@@ -93,6 +93,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     store.assign(selectedFiles(node, nodes).map(f => f.change.uri.fsPath), undefined)
   );
 
+  register('changeGroups.stageGroup', (node: GroupNode) => provider.stageGroup(node));
+  register('changeGroups.unstageGroup', (node: GroupNode) => provider.unstageGroup(node));
+
   register('changeGroups.stageFile', async (node: FileNode, nodes?: TreeNode[]) => {
     for (const [repo, paths] of byRepo(selectedFiles(node, nodes))) {
       await repo.add(paths);

@@ -263,6 +263,108 @@ describe('ChangeGroupsTreeProvider', () => {
     });
   });
 
+  describe('stageGroup', () => {
+    function findGroup(name: string): GroupNode {
+      const group = provider
+        .getChildren()
+        .find((n): n is GroupNode => n.kind === 'group' && n.name === name);
+      assert.ok(group, `group ${name} not found`);
+      return group;
+    }
+
+    beforeEach(async () => {
+      repo.state.workingTreeChanges.push(
+        makeChange('/repo/a.ts', Status.MODIFIED),
+        makeChange('/repo/b.ts', Status.MODIFIED),
+        makeChange('/repo/.env', Status.MODIFIED)
+      );
+      await store.assign(['/repo/.env'], 'ignored');
+    });
+
+    it('stages only the files in the Changes group', async () => {
+      await provider.stageGroup(findGroup('Changes'));
+      assert.deepStrictEqual(repo.added, [['/repo/a.ts', '/repo/b.ts']]);
+    });
+
+    it('stages only the files in a custom group', async () => {
+      await provider.stageGroup(findGroup('Ignored'));
+      assert.deepStrictEqual(repo.added, [['/repo/.env']]);
+    });
+
+    it('does nothing for an empty group', async () => {
+      const id = await store.createGroup('Empty');
+      await provider.stageGroup({ kind: 'group', id, name: 'Empty', repos: [repo as never] });
+      assert.deepStrictEqual(repo.added, []);
+    });
+
+    it('stages per repository when multiple repos are in scope', async () => {
+      const other = makeRepo('/other');
+      other.state.workingTreeChanges.push(makeChange('/other/c.ts', Status.MODIFIED));
+      createProvider([repo, other]);
+      await provider.stageGroup({
+        kind: 'group',
+        id: CHANGES_GROUP_ID,
+        name: 'Changes',
+        repos: [repo as never, other as never]
+      });
+      // The new provider has a fresh store, so .env is unassigned and sorts first.
+      assert.deepStrictEqual(repo.added, [['/repo/.env', '/repo/a.ts', '/repo/b.ts']]);
+      assert.deepStrictEqual(other.added, [['/other/c.ts']]);
+    });
+  });
+
+  describe('unstageGroup', () => {
+    function stagedNode(repos: FakeRepo[]): GroupNode {
+      return {
+        kind: 'group',
+        id: STAGED_GROUP_ID,
+        name: 'Staged Changes',
+        repos: repos as never[]
+      };
+    }
+
+    it('unstages every staged file in scope', async () => {
+      repo.state.indexChanges.push(
+        makeChange('/repo/a.ts', Status.INDEX_MODIFIED),
+        makeChange('/repo/b.ts', Status.INDEX_ADDED)
+      );
+      await provider.unstageGroup(stagedNode([repo]));
+      assert.deepStrictEqual(repo.reverted, [['/repo/a.ts', '/repo/b.ts']]);
+    });
+
+    it('does nothing when nothing is staged', async () => {
+      await provider.unstageGroup(stagedNode([repo]));
+      assert.deepStrictEqual(repo.reverted, []);
+    });
+
+    it('unstages per repository when multiple repos are in scope', async () => {
+      const other = makeRepo('/other');
+      other.state.indexChanges.push(makeChange('/other/c.ts', Status.INDEX_MODIFIED));
+      repo.state.indexChanges.push(makeChange('/repo/a.ts', Status.INDEX_MODIFIED));
+      createProvider([repo, other]);
+      await provider.unstageGroup(stagedNode([repo, other]));
+      assert.deepStrictEqual(repo.reverted, [['/repo/a.ts']]);
+      assert.deepStrictEqual(other.reverted, [['/other/c.ts']]);
+    });
+
+    it('returns unstaged files to their previous group', async () => {
+      await store.assign(['/repo/.env'], 'ignored');
+      // Staged: assignments are untouched while the file sits in the index.
+      repo.state.indexChanges.push(makeChange('/repo/.env', Status.INDEX_MODIFIED));
+      await provider.unstageGroup(stagedNode([repo]));
+      // Simulate git reporting the file back in the working tree.
+      repo.state.indexChanges.length = 0;
+      repo.state.workingTreeChanges.push(makeChange('/repo/.env', Status.MODIFIED));
+      repo.fireStateChange();
+
+      const ignored = provider
+        .getChildren()
+        .find((n): n is GroupNode => n.kind === 'group' && n.name === 'Ignored');
+      assert.ok(ignored);
+      assert.deepStrictEqual(filePaths(provider.getChildren(ignored)), ['/repo/.env']);
+    });
+  });
+
   describe('refresh wiring', () => {
     function countRefreshes(run: () => void): number {
       let fired = 0;

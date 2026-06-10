@@ -89,8 +89,20 @@
         "icon": "$(add)"
       },
       {
+        "command": "changeGroups.stageGroup",
+        "title": "Stage All Changes in Group",
+        "category": "Change Groups",
+        "icon": "$(add)"
+      },
+      {
         "command": "changeGroups.unstageFile",
         "title": "Unstage Changes",
+        "category": "Change Groups",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "changeGroups.unstageGroup",
+        "title": "Unstage All Changes",
         "category": "Change Groups",
         "icon": "$(remove)"
       },
@@ -182,14 +194,34 @@
           "group": "2_git@2"
         },
         {
-          "command": "changeGroups.moveGroupUp",
+          "command": "changeGroups.stageGroup",
           "when": "view == changeGroupsView && viewItem =~ /^group-(changes|custom)$/",
           "group": "inline@1"
         },
         {
+          "command": "changeGroups.unstageGroup",
+          "when": "view == changeGroupsView && viewItem == group-staged",
+          "group": "inline@1"
+        },
+        {
+          "command": "changeGroups.unstageGroup",
+          "when": "view == changeGroupsView && viewItem == group-staged",
+          "group": "2_git@1"
+        },
+        {
+          "command": "changeGroups.moveGroupUp",
+          "when": "view == changeGroupsView && viewItem =~ /^group-(changes|custom)$/",
+          "group": "0_order@1"
+        },
+        {
           "command": "changeGroups.moveGroupDown",
           "when": "view == changeGroupsView && viewItem =~ /^group-(changes|custom)$/",
-          "group": "inline@2"
+          "group": "0_order@2"
+        },
+        {
+          "command": "changeGroups.stageGroup",
+          "when": "view == changeGroupsView && viewItem =~ /^group-(changes|custom)$/",
+          "group": "2_git@1"
         },
         {
           "command": "changeGroups.renameGroup",
@@ -229,6 +261,14 @@
         },
         {
           "command": "changeGroups.stageFile",
+          "when": "false"
+        },
+        {
+          "command": "changeGroups.stageGroup",
+          "when": "false"
+        },
+        {
+          "command": "changeGroups.unstageGroup",
           "when": "false"
         },
         {

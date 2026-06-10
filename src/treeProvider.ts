@@ -106,6 +106,33 @@ export class ChangeGroupsTreeProvider
     }
   }
 
+  /** Stages every file currently shown in the given group. */
+  async stageGroup(node: GroupNode): Promise<void> {
+    const byRepo = new Map<Repository, string[]>();
+    for (const file of this.getFilesIn(node.id, node.repos)) {
+      const paths = byRepo.get(file.repo) ?? [];
+      paths.push(file.change.uri.fsPath);
+      byRepo.set(file.repo, paths);
+    }
+    for (const [repo, paths] of byRepo) {
+      await repo.add(paths);
+    }
+  }
+
+  /**
+   * Unstages every staged file in the group's scope. Unstaged files land
+   * back in whichever group they were assigned to, since assignments are
+   * sticky and keyed by path.
+   */
+  async unstageGroup(node: GroupNode): Promise<void> {
+    for (const repo of node.repos) {
+      const paths = repo.state.indexChanges.map(change => change.uri.fsPath);
+      if (paths.length) {
+        await repo.revert(paths);
+      }
+    }
+  }
+
   /** Repositories selected in the built-in Repositories section (all, if none report selection). */
   private selectedRepos(): Repository[] {
     const all = this.git.repositories;
