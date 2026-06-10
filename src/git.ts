@@ -59,9 +59,14 @@ export interface Repository {
   clean(paths: string[]): Promise<void>;
 }
 
+export interface Git {
+  readonly path: string;
+}
+
 export interface API {
   readonly state: 'uninitialized' | 'initialized';
   readonly onDidChangeState: vscode.Event<'uninitialized' | 'initialized'>;
+  readonly git: Git;
   readonly repositories: Repository[];
   readonly onDidOpenRepository: vscode.Event<Repository>;
   readonly onDidCloseRepository: vscode.Event<Repository>;

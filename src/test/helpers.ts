@@ -97,6 +97,7 @@ export function makeGitApi(repos: FakeRepo[]): FakeGit {
   const repositories = [...repos] as unknown as Repository[];
   const api = {
     state: 'initialized',
+    git: { path: 'git' },
     onDidChangeState: stateEmitter.event,
     repositories,
     onDidOpenRepository: openEmitter.event,

@@ -120,6 +120,74 @@ export class ChangeGroupsTreeProvider
   }
 
   /**
+   * Stages every working-tree change (untracked included) in the given
+   * repositories, regardless of which group the files are in.
+   */
+  async stageAllChanges(repos: Repository[]): Promise<void> {
+    for (const repo of repos) {
+      const paths = this.workingChanges(repo).map(change => change.uri.fsPath);
+      if (paths.length) {
+        await repo.add(paths);
+      }
+    }
+  }
+
+  /**
+   * Stashes everything in the given repositories — staged, unstaged and
+   * untracked — via a plain `git stash push`. Returns false when no repo
+   * had anything to stash.
+   */
+  async stashAllChanges(
+    repos: Repository[],
+    message: string | undefined,
+    runGit: (cwd: string, args: string[]) => Promise<void>
+  ): Promise<boolean> {
+    let stashedAny = false;
+    for (const repo of repos) {
+      if (this.workingChanges(repo).length === 0 && repo.state.indexChanges.length === 0) {
+        continue;
+      }
+      const args = ['stash', 'push', '--include-untracked'];
+      if (message) {
+        args.push('-m', message);
+      }
+      await runGit(repo.rootUri.fsPath, args);
+      stashedAny = true;
+    }
+    return stashedAny;
+  }
+
+  /**
+   * Stashes every file currently shown in the group via `git stash push`,
+   * one stash per repository in scope. Returns false when the group is
+   * empty. The git invocation is injected so the logic stays testable.
+   */
+  async stashGroup(
+    node: GroupNode,
+    message: string | undefined,
+    runGit: (cwd: string, args: string[]) => Promise<void>
+  ): Promise<boolean> {
+    const byRepo = new Map<Repository, string[]>();
+    for (const file of this.getFilesIn(node.id, node.repos)) {
+      const paths = byRepo.get(file.repo) ?? [];
+      paths.push(file.change.uri.fsPath);
+      byRepo.set(file.repo, paths);
+    }
+    if (byRepo.size === 0) {
+      return false;
+    }
+    for (const [repo, paths] of byRepo) {
+      const args = ['stash', 'push', '--include-untracked'];
+      if (message) {
+        args.push('-m', message);
+      }
+      args.push('--', ...paths);
+      await runGit(repo.rootUri.fsPath, args);
+    }
+    return true;
+  }
+
+  /**
    * Unstages every staged file in the group's scope. Unstaged files land
    * back in whichever group they were assigned to, since assignments are
    * sticky and keyed by path.
@@ -134,7 +202,7 @@ export class ChangeGroupsTreeProvider
   }
 
   /** Repositories selected in the built-in Repositories section (all, if none report selection). */
-  private selectedRepos(): Repository[] {
+  selectedRepos(): Repository[] {
     const all = this.git.repositories;
     const selected = all.filter(repo => repo.ui?.selected);
     return selected.length ? selected : all;
@@ -176,7 +244,10 @@ export class ChangeGroupsTreeProvider
     if (repos.some(r => r.state.indexChanges.length > 0)) {
       nodes.push({ kind: 'group', id: STAGED_GROUP_ID, name: 'Staged Changes', repos });
     }
-    for (const group of this.store.groups) {
+    // Group nodes are always scoped to a single repository: the root level
+    // shows groups only when exactly one repo is selected, and repo nodes
+    // pass themselves individually.
+    for (const group of this.store.groupsFor(repos[0].rootUri.fsPath)) {
       nodes.push({ kind: 'group', id: group.id, name: group.name, repos });
     }
     return nodes;
@@ -192,7 +263,8 @@ export class ChangeGroupsTreeProvider
         continue;
       }
       for (const change of this.workingChanges(repo)) {
-        const assigned = this.store.groupOf(change.uri.fsPath) ?? CHANGES_GROUP_ID;
+        const assigned =
+          this.store.groupOf(repo.rootUri.fsPath, change.uri.fsPath) ?? CHANGES_GROUP_ID;
         if (assigned === groupId) {
           files.push({ kind: 'file', repo, change, groupId });
         }
@@ -300,11 +372,15 @@ export class ChangeGroupsTreeProvider
       return;
     }
     const targetGroupId = target.kind === 'group' ? target.id : target.groupId;
+    const targetRepoRoot =
+      target.kind === 'group' ? target.repos[0].rootUri.fsPath : target.repo.rootUri.fsPath;
 
     const draggedGroup = source.find((n): n is GroupNode => n.kind === 'group');
     if (draggedGroup) {
-      if (targetGroupId !== STAGED_GROUP_ID) {
-        await this.store.reorderGroup(draggedGroup.id, targetGroupId);
+      // Groups are per-repository, so only reorder within the same repo.
+      const dragRepoRoot = draggedGroup.repos[0].rootUri.fsPath;
+      if (targetGroupId !== STAGED_GROUP_ID && dragRepoRoot === targetRepoRoot) {
+        await this.store.reorderGroup(dragRepoRoot, draggedGroup.id, targetGroupId);
       }
       return;
     }
@@ -326,9 +402,16 @@ export class ChangeGroupsTreeProvider
       }
       return;
     }
-    await this.store.assign(
-      files.map(f => f.change.uri.fsPath),
-      targetGroupId === CHANGES_GROUP_ID ? undefined : targetGroupId
-    );
+    // Files can only join groups of their own repository.
+    const paths = files
+      .filter(f => f.repo.rootUri.fsPath === targetRepoRoot)
+      .map(f => f.change.uri.fsPath);
+    if (paths.length) {
+      await this.store.assign(
+        targetRepoRoot,
+        paths,
+        targetGroupId === CHANGES_GROUP_ID ? undefined : targetGroupId
+      );
+    }
   }
 }

@@ -58,8 +58,8 @@ describe('ChangeGroupsTreeProvider', () => {
     });
 
     it('respects the stored group order', async () => {
-      await store.createGroup('WIP');
-      await store.moveGroup('ignored', 1); // ignored below WIP
+      await store.createGroup('/repo', 'WIP');
+      await store.moveGroup('/repo', 'ignored', 1); // ignored below WIP
       assert.deepStrictEqual(groupNames(provider.getChildren()), ['Changes', 'WIP', 'Ignored']);
     });
 
@@ -96,16 +96,16 @@ describe('ChangeGroupsTreeProvider', () => {
     });
 
     it('moves assigned files to their group and back', async () => {
-      await store.assign(['/repo/.env'], 'ignored');
+      await store.assign('/repo', ['/repo/.env'], 'ignored');
       assert.deepStrictEqual(filePaths(childrenOf('Ignored')), ['/repo/.env']);
       assert.ok(!filePaths(childrenOf('Changes')).includes('/repo/.env'));
 
-      await store.assign(['/repo/.env'], undefined);
+      await store.assign('/repo', ['/repo/.env'], undefined);
       assert.ok(filePaths(childrenOf('Changes')).includes('/repo/.env'));
     });
 
     it('keeps staged files in Staged Changes regardless of assignment', async () => {
-      await store.assign(['/repo/src/app.ts'], 'ignored');
+      await store.assign('/repo', ['/repo/src/app.ts'], 'ignored');
       repo.state.indexChanges.push(makeChange('/repo/src/app.ts', Status.INDEX_MODIFIED));
       assert.deepStrictEqual(filePaths(childrenOf('Staged Changes')), ['/repo/src/app.ts']);
     });
@@ -149,6 +149,21 @@ describe('ChangeGroupsTreeProvider', () => {
       assert.deepStrictEqual(filePaths(provider.getChildren(repoGroups[0])), ['/repo/a.ts']);
     });
 
+    it('shows each repository its own groups', async () => {
+      await store.createGroup('/repo', 'Repo only');
+      repo.setSelected(true);
+      other.setSelected(false);
+      assert.deepStrictEqual(groupNames(provider.getChildren()), [
+        'Changes',
+        'Ignored',
+        'Repo only'
+      ]);
+
+      repo.setSelected(false);
+      other.setSelected(true);
+      assert.deepStrictEqual(groupNames(provider.getChildren()), ['Changes', 'Ignored']);
+    });
+
     it('falls back to all repositories when none reports selection', () => {
       repo.setSelected(false);
       other.setSelected(false);
@@ -178,7 +193,7 @@ describe('ChangeGroupsTreeProvider', () => {
         makeChange('/repo/src/app.ts', Status.MODIFIED),
         makeChange('/repo/.env', Status.MODIFIED)
       );
-      await store.assign(['/repo/.env'], 'ignored');
+      await store.assign('/repo', ['/repo/.env'], 'ignored');
       const [changes, ignored] = provider.getChildren() as GroupNode[];
 
       const appItem = provider.getTreeItem(provider.getChildren(changes)[0]);
@@ -228,17 +243,17 @@ describe('ChangeGroupsTreeProvider', () => {
     it('assigns dropped files to the target group', async () => {
       const transfer = drag([fileNode('/repo/.env', CHANGES_GROUP_ID)]);
       await provider.handleDrop(groupNode('ignored', 'Ignored'), transfer as never);
-      assert.strictEqual(store.groupOf('/repo/.env'), 'ignored');
+      assert.strictEqual(store.groupOf('/repo', '/repo/.env'), 'ignored');
     });
 
     it('clears the assignment when dropping onto Changes', async () => {
-      await store.assign(['/repo/.env'], 'ignored');
+      await store.assign('/repo', ['/repo/.env'], 'ignored');
       const transfer = drag([fileNode('/repo/.env', 'ignored')]);
       await provider.handleDrop(
         groupNode(CHANGES_GROUP_ID, 'Changes'),
         transfer as never
       );
-      assert.strictEqual(store.groupOf('/repo/.env'), undefined);
+      assert.strictEqual(store.groupOf('/repo', '/repo/.env'), undefined);
     });
 
     it('stages files dropped onto Staged Changes', async () => {
@@ -257,7 +272,7 @@ describe('ChangeGroupsTreeProvider', () => {
         transfer as never
       );
       assert.deepStrictEqual(
-        store.groups.map(g => g.id),
+        store.groupsFor('/repo').map(g => g.id),
         ['ignored', CHANGES_GROUP_ID]
       );
     });
@@ -278,7 +293,7 @@ describe('ChangeGroupsTreeProvider', () => {
         makeChange('/repo/b.ts', Status.MODIFIED),
         makeChange('/repo/.env', Status.MODIFIED)
       );
-      await store.assign(['/repo/.env'], 'ignored');
+      await store.assign('/repo', ['/repo/.env'], 'ignored');
     });
 
     it('stages only the files in the Changes group', async () => {
@@ -292,7 +307,7 @@ describe('ChangeGroupsTreeProvider', () => {
     });
 
     it('does nothing for an empty group', async () => {
-      const id = await store.createGroup('Empty');
+      const id = await store.createGroup('/repo', 'Empty');
       await provider.stageGroup({ kind: 'group', id, name: 'Empty', repos: [repo as never] });
       assert.deepStrictEqual(repo.added, []);
     });
@@ -310,6 +325,151 @@ describe('ChangeGroupsTreeProvider', () => {
       // The new provider has a fresh store, so .env is unassigned and sorts first.
       assert.deepStrictEqual(repo.added, [['/repo/.env', '/repo/a.ts', '/repo/b.ts']]);
       assert.deepStrictEqual(other.added, [['/other/c.ts']]);
+    });
+  });
+
+  describe('stageAllChanges', () => {
+    it('stages every working change including untracked and grouped files', async () => {
+      repo.state.workingTreeChanges.push(
+        makeChange('/repo/a.ts', Status.MODIFIED),
+        makeChange('/repo/.env', Status.MODIFIED)
+      );
+      repo.state.untrackedChanges.push(makeChange('/repo/new.ts', Status.UNTRACKED));
+      await store.assign('/repo', ['/repo/.env'], 'ignored');
+
+      await provider.stageAllChanges([repo as never]);
+      assert.deepStrictEqual(repo.added, [['/repo/a.ts', '/repo/.env', '/repo/new.ts']]);
+    });
+
+    it('stages per repository and skips repos with nothing to stage', async () => {
+      const other = makeRepo('/other');
+      repo.state.workingTreeChanges.push(makeChange('/repo/a.ts', Status.MODIFIED));
+      await provider.stageAllChanges([repo as never, other as never]);
+      assert.deepStrictEqual(repo.added, [['/repo/a.ts']]);
+      assert.deepStrictEqual(other.added, []);
+    });
+  });
+
+  describe('stashAllChanges', () => {
+    let runs: { cwd: string; args: string[] }[];
+
+    const runGit = async (cwd: string, args: string[]) => {
+      runs.push({ cwd, args });
+    };
+
+    beforeEach(() => {
+      runs = [];
+    });
+
+    it('stashes the whole repository without path filters', async () => {
+      repo.state.workingTreeChanges.push(makeChange('/repo/a.ts', Status.MODIFIED));
+      repo.state.indexChanges.push(makeChange('/repo/b.ts', Status.INDEX_MODIFIED));
+      const stashed = await provider.stashAllChanges([repo as never], 'wip', runGit);
+      assert.strictEqual(stashed, true);
+      assert.deepStrictEqual(runs, [
+        { cwd: '/repo', args: ['stash', 'push', '--include-untracked', '-m', 'wip'] }
+      ]);
+    });
+
+    it('stashes repositories with only staged changes', async () => {
+      repo.state.indexChanges.push(makeChange('/repo/b.ts', Status.INDEX_MODIFIED));
+      const stashed = await provider.stashAllChanges([repo as never], undefined, runGit);
+      assert.strictEqual(stashed, true);
+      assert.deepStrictEqual(runs[0].args, ['stash', 'push', '--include-untracked']);
+    });
+
+    it('skips clean repositories and reports when nothing was stashed', async () => {
+      const other = makeRepo('/other');
+      other.state.workingTreeChanges.push(makeChange('/other/c.ts', Status.MODIFIED));
+      const stashed = await provider.stashAllChanges(
+        [repo as never, other as never],
+        undefined,
+        runGit
+      );
+      assert.strictEqual(stashed, true);
+      assert.deepStrictEqual(runs.map(r => r.cwd), ['/other']);
+
+      runs = [];
+      assert.strictEqual(await provider.stashAllChanges([repo as never], undefined, runGit), false);
+      assert.deepStrictEqual(runs, []);
+    });
+  });
+
+  describe('stashGroup', () => {
+    let runs: { cwd: string; args: string[] }[];
+
+    const runGit = async (cwd: string, args: string[]) => {
+      runs.push({ cwd, args });
+    };
+
+    function findGroup(name: string): GroupNode {
+      const group = provider
+        .getChildren()
+        .find((n): n is GroupNode => n.kind === 'group' && n.name === name);
+      assert.ok(group, `group ${name} not found`);
+      return group;
+    }
+
+    beforeEach(async () => {
+      runs = [];
+      repo.state.workingTreeChanges.push(
+        makeChange('/repo/a.ts', Status.MODIFIED),
+        makeChange('/repo/.env', Status.MODIFIED)
+      );
+      await store.assign('/repo', ['/repo/.env'], 'ignored');
+    });
+
+    it('stashes only the files in the group, including untracked', async () => {
+      const stashed = await provider.stashGroup(findGroup('Changes'), undefined, runGit);
+      assert.strictEqual(stashed, true);
+      assert.deepStrictEqual(runs, [
+        {
+          cwd: '/repo',
+          args: ['stash', 'push', '--include-untracked', '--', '/repo/a.ts']
+        }
+      ]);
+    });
+
+    it('passes the stash message when provided', async () => {
+      await provider.stashGroup(findGroup('Ignored'), 'local config', runGit);
+      assert.deepStrictEqual(runs, [
+        {
+          cwd: '/repo',
+          args: ['stash', 'push', '--include-untracked', '-m', 'local config', '--', '/repo/.env']
+        }
+      ]);
+    });
+
+    it('returns false for an empty group without invoking git', async () => {
+      const id = await store.createGroup('/repo', 'Empty');
+      const stashed = await provider.stashGroup(
+        { kind: 'group', id, name: 'Empty', repos: [repo as never] },
+        undefined,
+        runGit
+      );
+      assert.strictEqual(stashed, false);
+      assert.deepStrictEqual(runs, []);
+    });
+
+    it('creates one stash per repository when multiple repos are in scope', async () => {
+      const other = makeRepo('/other');
+      other.state.workingTreeChanges.push(makeChange('/other/b.ts', Status.MODIFIED));
+      createProvider([repo, other]);
+      await provider.stashGroup(
+        {
+          kind: 'group',
+          id: CHANGES_GROUP_ID,
+          name: 'Changes',
+          repos: [repo as never, other as never]
+        },
+        undefined,
+        runGit
+      );
+      // Files are sorted by path before grouping, so /other comes first.
+      assert.deepStrictEqual(
+        runs.map(r => r.cwd),
+        ['/other', '/repo']
+      );
     });
   });
 
@@ -348,7 +508,7 @@ describe('ChangeGroupsTreeProvider', () => {
     });
 
     it('returns unstaged files to their previous group', async () => {
-      await store.assign(['/repo/.env'], 'ignored');
+      await store.assign('/repo', ['/repo/.env'], 'ignored');
       // Staged: assignments are untouched while the file sits in the index.
       repo.state.indexChanges.push(makeChange('/repo/.env', Status.INDEX_MODIFIED));
       await provider.unstageGroup(stagedNode([repo]));
@@ -385,8 +545,8 @@ describe('ChangeGroupsTreeProvider', () => {
     it('refreshes when groups or assignments change', async () => {
       let fired = 0;
       const subscription = provider.onDidChangeTreeData(() => fired++);
-      await store.createGroup('A');
-      await store.assign(['/repo/x'], 'ignored');
+      await store.createGroup('/repo', 'A');
+      await store.assign('/repo', ['/repo/x'], 'ignored');
       subscription.dispose();
       assert.strictEqual(fired, 2);
     });

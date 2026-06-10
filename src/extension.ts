@@ -1,4 +1,6 @@
+import { execFile } from 'child_process';
 import * as path from 'path';
+import { promisify } from 'util';
 import * as vscode from 'vscode';
 import { API, GitExtension, Repository, Status } from './git';
 import { CHANGES_GROUP_ID, GroupStore } from './groupStore';
@@ -46,17 +48,40 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   register('changeGroups.refresh', () => provider.refresh());
 
+  const groupRepoRoot = (node: GroupNode): string => node.repos[0].rootUri.fsPath;
+
   register('changeGroups.createGroup', async () => {
-    const name = await promptGroupName(store);
+    const repos = provider.selectedRepos();
+    if (!repos.length) {
+      void vscode.window.showWarningMessage('No git repository found.');
+      return;
+    }
+    let repo = repos[0];
+    if (repos.length > 1) {
+      const picked = await vscode.window.showQuickPick(
+        repos.map(r => ({ label: path.basename(r.rootUri.fsPath), repo: r })),
+        { placeHolder: 'Create the group in which repository?' }
+      );
+      if (!picked) {
+        return;
+      }
+      repo = picked.repo;
+    }
+    const root = repo.rootUri.fsPath;
+    const name = await promptGroupName(store.groupsFor(root).map(g => g.name));
     if (name) {
-      await store.createGroup(name);
+      await store.createGroup(root, name);
     }
   });
 
   register('changeGroups.renameGroup', async (node: GroupNode) => {
-    const name = await promptGroupName(store, store.getGroup(node.id)?.name);
+    const root = groupRepoRoot(node);
+    const name = await promptGroupName(
+      store.groupsFor(root).map(g => g.name),
+      store.getGroup(root, node.id)?.name
+    );
     if (name) {
-      await store.renameGroup(node.id, name);
+      await store.renameGroup(root, node.id, name);
     }
   });
 
@@ -67,34 +92,124 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       'Delete'
     );
     if (choice === 'Delete') {
-      await store.deleteGroup(node.id);
+      await store.deleteGroup(groupRepoRoot(node), node.id);
     }
   });
 
-  register('changeGroups.moveGroupUp', (node: GroupNode) => store.moveGroup(node.id, -1));
-  register('changeGroups.moveGroupDown', (node: GroupNode) => store.moveGroup(node.id, 1));
+  register('changeGroups.moveGroupUp', (node: GroupNode) =>
+    store.moveGroup(groupRepoRoot(node), node.id, -1)
+  );
+  register('changeGroups.moveGroupDown', (node: GroupNode) =>
+    store.moveGroup(groupRepoRoot(node), node.id, 1)
+  );
 
   register('changeGroups.addToGroup', async (node: FileNode, nodes?: TreeNode[]) => {
     const files = selectedFiles(node, nodes);
     if (!files.length) {
       return;
     }
+    const roots = [...new Set(files.map(f => f.repo.rootUri.fsPath))];
+    // Selections can span repositories; offer the union of their group
+    // names and resolve per repo by name when assigning.
+    const names = new Set<string>();
+    for (const root of roots) {
+      for (const group of store.groupsFor(root)) {
+        if (group.id !== CHANGES_GROUP_ID) {
+          names.add(group.name);
+        }
+      }
+    }
     const what = files.length === 1
       ? path.basename(files[0].change.uri.fsPath)
       : `${files.length} files`;
-    const groupId = await pickGroup(store, `Add ${what} to group (type a new name to create one)`);
-    if (!groupId) {
+    const name = await pickGroup([...names], `Add ${what} to group (type a new name to create one)`);
+    if (!name) {
       return;
     }
-    await store.assign(files.map(f => f.change.uri.fsPath), groupId);
+    for (const root of roots) {
+      const groupId = await store.ensureGroup(root, name);
+      await store.assign(
+        root,
+        files.filter(f => f.repo.rootUri.fsPath === root).map(f => f.change.uri.fsPath),
+        groupId
+      );
+    }
   });
 
-  register('changeGroups.removeFromGroup', (node: FileNode, nodes?: TreeNode[]) =>
-    store.assign(selectedFiles(node, nodes).map(f => f.change.uri.fsPath), undefined)
-  );
+  register('changeGroups.removeFromGroup', async (node: FileNode, nodes?: TreeNode[]) => {
+    const files = selectedFiles(node, nodes);
+    const roots = [...new Set(files.map(f => f.repo.rootUri.fsPath))];
+    for (const root of roots) {
+      await store.assign(
+        root,
+        files.filter(f => f.repo.rootUri.fsPath === root).map(f => f.change.uri.fsPath),
+        undefined
+      );
+    }
+  });
 
   register('changeGroups.stageGroup', (node: GroupNode) => provider.stageGroup(node));
   register('changeGroups.unstageGroup', (node: GroupNode) => provider.unstageGroup(node));
+
+  // From the Staged Changes header the scope is the node's repos; from the
+  // view title bar (or the palette) it is the selected repositories.
+  register('changeGroups.stageAll', (node?: GroupNode) =>
+    provider.stageAllChanges(node?.repos ?? provider.selectedRepos())
+  );
+
+  const execFileAsync = promisify(execFile);
+  const runGit = async (cwd: string, args: string[]): Promise<void> => {
+    await execFileAsync(git.git?.path ?? 'git', args, { cwd });
+  };
+
+  const promptStashMessage = (initial?: string): Thenable<string | undefined> =>
+    vscode.window.showInputBox({
+      prompt: 'Stash message (optional)',
+      placeHolder: 'Stash message',
+      value: initial
+    });
+
+  const showStashError = (err: unknown): void => {
+    const gitError = err as { stderr?: string; message?: string };
+    void vscode.window.showErrorMessage(
+      `Stash failed: ${gitError.stderr?.trim() || gitError.message || String(err)}`
+    );
+  };
+
+  register('changeGroups.stashGroup', async (node: GroupNode) => {
+    const message = await promptStashMessage(node.id === CHANGES_GROUP_ID ? '' : node.name);
+    if (message === undefined) {
+      return; // cancelled
+    }
+    try {
+      const stashed = await provider.stashGroup(node, message.trim() || undefined, runGit);
+      if (!stashed) {
+        void vscode.window.showInformationMessage('There are no changes to stash in this group.');
+      }
+    } catch (err) {
+      showStashError(err);
+    }
+  });
+
+  register('changeGroups.stashAll', async (node?: GroupNode) => {
+    const repos = node?.repos ?? provider.selectedRepos();
+    if (!repos.length) {
+      void vscode.window.showWarningMessage('No git repository found.');
+      return;
+    }
+    const message = await promptStashMessage();
+    if (message === undefined) {
+      return; // cancelled
+    }
+    try {
+      const stashed = await provider.stashAllChanges(repos, message.trim() || undefined, runGit);
+      if (!stashed) {
+        void vscode.window.showInformationMessage('There are no changes to stash.');
+      }
+    } catch (err) {
+      showStashError(err);
+    }
+  });
 
   register('changeGroups.stageFile', async (node: FileNode, nodes?: TreeNode[]) => {
     for (const [repo, paths] of byRepo(selectedFiles(node, nodes))) {
@@ -144,21 +259,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 export function deactivate(): void {}
 
 /**
- * Quick pick over existing groups where typing a name that matches no group
- * offers a live "Create group …" item, so Enter on free text just works.
+ * Quick pick over existing group names where typing a name that matches no
+ * group offers a live "Create group …" item, so Enter on free text just
+ * works. Resolves with the chosen (or newly typed) group name.
  */
-function pickGroup(store: GroupStore, placeholder: string): Promise<string | undefined> {
-  type GroupItem = vscode.QuickPickItem & { id?: string; createName?: string };
+function pickGroup(names: string[], placeholder: string): Promise<string | undefined> {
+  type GroupItem = vscode.QuickPickItem & { createName?: string };
   return new Promise(resolve => {
     const qp = vscode.window.createQuickPick<GroupItem>();
     qp.placeholder = placeholder;
-    const baseItems: GroupItem[] = store.groups
-      .filter(g => g.id !== CHANGES_GROUP_ID)
-      .map(g => ({ label: g.name, id: g.id, iconPath: new vscode.ThemeIcon('folder') }));
+    const baseItems: GroupItem[] = names.map(name => ({
+      label: name,
+      iconPath: new vscode.ThemeIcon('folder')
+    }));
     const update = () => {
       const value = qp.value.trim();
       const items: GroupItem[] = [...baseItems];
-      if (value && !store.groups.some(g => g.name.toLowerCase() === value.toLowerCase())) {
+      if (value && !names.some(name => name.toLowerCase() === value.toLowerCase())) {
         items.push({
           label: `$(plus) Create group "${value}"`,
           createName: value,
@@ -178,11 +295,7 @@ function pickGroup(store: GroupStore, placeholder: string): Promise<string | und
       }
       accepted = true;
       qp.hide();
-      if (picked.createName) {
-        store.createGroup(picked.createName).then(resolve);
-      } else {
-        resolve(picked.id);
-      }
+      resolve(picked.createName ?? picked.label);
     });
     qp.onDidHide(() => {
       qp.dispose();
@@ -194,7 +307,10 @@ function pickGroup(store: GroupStore, placeholder: string): Promise<string | und
   });
 }
 
-async function promptGroupName(store: GroupStore, initial?: string): Promise<string | undefined> {
+async function promptGroupName(
+  existingNames: string[],
+  initial?: string
+): Promise<string | undefined> {
   const name = await vscode.window.showInputBox({
     prompt: 'Change group name',
     placeHolder: 'e.g. Local config, WIP, Ignored',
@@ -204,7 +320,7 @@ async function promptGroupName(store: GroupStore, initial?: string): Promise<str
       if (!trimmed) {
         return 'Name cannot be empty';
       }
-      if (trimmed !== initial && store.groups.some(g => g.name === trimmed)) {
+      if (trimmed !== initial && existingNames.includes(trimmed)) {
         return 'A group with this name already exists';
       }
       return undefined;

@@ -107,6 +107,24 @@
         "icon": "$(remove)"
       },
       {
+        "command": "changeGroups.stashGroup",
+        "title": "Stash All Changes in Group",
+        "category": "Change Groups",
+        "icon": "$(git-stash)"
+      },
+      {
+        "command": "changeGroups.stageAll",
+        "title": "Stage All Changes",
+        "category": "Change Groups",
+        "icon": "$(add)"
+      },
+      {
+        "command": "changeGroups.stashAll",
+        "title": "Stash All Changes",
+        "category": "Change Groups",
+        "icon": "$(git-stash)"
+      },
+      {
         "command": "changeGroups.discardFile",
         "title": "Discard Changes",
         "category": "Change Groups",
@@ -135,6 +153,16 @@
           "command": "changeGroups.refresh",
           "when": "view == changeGroupsView",
           "group": "navigation@2"
+        },
+        {
+          "command": "changeGroups.stashAll",
+          "when": "view == changeGroupsView",
+          "group": "navigation@3"
+        },
+        {
+          "command": "changeGroups.stageAll",
+          "when": "view == changeGroupsView",
+          "group": "navigation@4"
         }
       ],
       "view/item/context": [
@@ -149,18 +177,18 @@
           "group": "inline@2"
         },
         {
-          "command": "changeGroups.stageFile",
+          "command": "changeGroups.addToGroup",
           "when": "view == changeGroupsView && viewItem =~ /^file-(changes|grouped)$/",
           "group": "inline@3"
         },
         {
-          "command": "changeGroups.addToGroup",
-          "when": "view == changeGroupsView && viewItem =~ /^file-(changes|grouped)$/",
+          "command": "changeGroups.removeFromGroup",
+          "when": "view == changeGroupsView && viewItem == file-grouped",
           "group": "inline@4"
         },
         {
-          "command": "changeGroups.removeFromGroup",
-          "when": "view == changeGroupsView && viewItem == file-grouped",
+          "command": "changeGroups.stageFile",
+          "when": "view == changeGroupsView && viewItem =~ /^file-(changes|grouped)$/",
           "group": "inline@5"
         },
         {
@@ -194,19 +222,34 @@
           "group": "2_git@2"
         },
         {
-          "command": "changeGroups.stageGroup",
+          "command": "changeGroups.stashGroup",
           "when": "view == changeGroupsView && viewItem =~ /^group-(changes|custom)$/",
           "group": "inline@1"
+        },
+        {
+          "command": "changeGroups.stageGroup",
+          "when": "view == changeGroupsView && viewItem =~ /^group-(changes|custom)$/",
+          "group": "inline@2"
         },
         {
           "command": "changeGroups.unstageGroup",
           "when": "view == changeGroupsView && viewItem == group-staged",
           "group": "inline@1"
+        },
+        {
+          "command": "changeGroups.stageAll",
+          "when": "view == changeGroupsView && viewItem == group-staged",
+          "group": "inline@2"
         },
         {
           "command": "changeGroups.unstageGroup",
           "when": "view == changeGroupsView && viewItem == group-staged",
           "group": "2_git@1"
+        },
+        {
+          "command": "changeGroups.stageAll",
+          "when": "view == changeGroupsView && viewItem == group-staged",
+          "group": "2_git@2"
         },
         {
           "command": "changeGroups.moveGroupUp",
@@ -222,6 +265,11 @@
           "command": "changeGroups.stageGroup",
           "when": "view == changeGroupsView && viewItem =~ /^group-(changes|custom)$/",
           "group": "2_git@1"
+        },
+        {
+          "command": "changeGroups.stashGroup",
+          "when": "view == changeGroupsView && viewItem =~ /^group-(changes|custom)$/",
+          "group": "2_git@2"
         },
         {
           "command": "changeGroups.renameGroup",
@@ -269,6 +317,10 @@
         },
         {
           "command": "changeGroups.unstageGroup",
+          "when": "false"
+        },
+        {
+          "command": "changeGroups.stashGroup",
           "when": "false"
         },
         {
