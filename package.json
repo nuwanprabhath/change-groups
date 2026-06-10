@@ -1,0 +1,266 @@
+{
+  "name": "change-groups",
+  "displayName": "Change Groups",
+  "description": "Group git changes into collapsible groups to de-clutter your Source Control view.",
+  "version": "0.0.1",
+  "publisher": "nuwan",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.84.0"
+  },
+  "categories": [
+    "SCM Providers"
+  ],
+  "extensionDependencies": [
+    "vscode.git"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "views": {
+      "scm": [
+        {
+          "id": "changeGroupsView",
+          "name": "Change Groups",
+          "icon": "$(source-control)"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "changeGroupsView",
+        "contents": "No git repository found.\nOpen a folder that contains a git repository to use Change Groups."
+      }
+    ],
+    "commands": [
+      {
+        "command": "changeGroups.refresh",
+        "title": "Refresh",
+        "category": "Change Groups",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "changeGroups.createGroup",
+        "title": "Create Change Group",
+        "category": "Change Groups",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "changeGroups.renameGroup",
+        "title": "Rename Group",
+        "category": "Change Groups",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "changeGroups.deleteGroup",
+        "title": "Delete Group",
+        "category": "Change Groups",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "changeGroups.moveGroupUp",
+        "title": "Move Group Up",
+        "category": "Change Groups",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "changeGroups.moveGroupDown",
+        "title": "Move Group Down",
+        "category": "Change Groups",
+        "icon": "$(arrow-down)"
+      },
+      {
+        "command": "changeGroups.addToGroup",
+        "title": "Add to Group",
+        "category": "Change Groups",
+        "icon": "$(group-by-ref-type)"
+      },
+      {
+        "command": "changeGroups.removeFromGroup",
+        "title": "Remove from Group (Move Back to Changes)",
+        "category": "Change Groups",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "changeGroups.stageFile",
+        "title": "Stage Changes",
+        "category": "Change Groups",
+        "icon": "$(add)"
+      },
+      {
+        "command": "changeGroups.unstageFile",
+        "title": "Unstage Changes",
+        "category": "Change Groups",
+        "icon": "$(remove)"
+      },
+      {
+        "command": "changeGroups.discardFile",
+        "title": "Discard Changes",
+        "category": "Change Groups",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "changeGroups.openFile",
+        "title": "Open File",
+        "category": "Change Groups",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "changeGroups.openChanges",
+        "title": "Open Changes",
+        "category": "Change Groups"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "changeGroups.createGroup",
+          "when": "view == changeGroupsView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "changeGroups.refresh",
+          "when": "view == changeGroupsView",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "changeGroups.openFile",
+          "when": "view == changeGroupsView && viewItem =~ /^file-/",
+          "group": "inline@1"
+        },
+        {
+          "command": "changeGroups.discardFile",
+          "when": "view == changeGroupsView && viewItem =~ /^file-(changes|grouped)$/",
+          "group": "inline@2"
+        },
+        {
+          "command": "changeGroups.stageFile",
+          "when": "view == changeGroupsView && viewItem =~ /^file-(changes|grouped)$/",
+          "group": "inline@3"
+        },
+        {
+          "command": "changeGroups.addToGroup",
+          "when": "view == changeGroupsView && viewItem =~ /^file-(changes|grouped)$/",
+          "group": "inline@4"
+        },
+        {
+          "command": "changeGroups.removeFromGroup",
+          "when": "view == changeGroupsView && viewItem == file-grouped",
+          "group": "inline@5"
+        },
+        {
+          "command": "changeGroups.unstageFile",
+          "when": "view == changeGroupsView && viewItem == file-staged",
+          "group": "inline@2"
+        },
+        {
+          "command": "changeGroups.addToGroup",
+          "when": "view == changeGroupsView && viewItem =~ /^file-(changes|grouped)$/",
+          "group": "1_modification@1"
+        },
+        {
+          "command": "changeGroups.removeFromGroup",
+          "when": "view == changeGroupsView && viewItem == file-grouped",
+          "group": "1_modification@2"
+        },
+        {
+          "command": "changeGroups.stageFile",
+          "when": "view == changeGroupsView && viewItem =~ /^file-(changes|grouped)$/",
+          "group": "2_git@1"
+        },
+        {
+          "command": "changeGroups.unstageFile",
+          "when": "view == changeGroupsView && viewItem == file-staged",
+          "group": "2_git@1"
+        },
+        {
+          "command": "changeGroups.discardFile",
+          "when": "view == changeGroupsView && viewItem =~ /^file-(changes|grouped)$/",
+          "group": "2_git@2"
+        },
+        {
+          "command": "changeGroups.moveGroupUp",
+          "when": "view == changeGroupsView && viewItem =~ /^group-(changes|custom)$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "changeGroups.moveGroupDown",
+          "when": "view == changeGroupsView && viewItem =~ /^group-(changes|custom)$/",
+          "group": "inline@2"
+        },
+        {
+          "command": "changeGroups.renameGroup",
+          "when": "view == changeGroupsView && viewItem == group-custom",
+          "group": "1_modification@1"
+        },
+        {
+          "command": "changeGroups.deleteGroup",
+          "when": "view == changeGroupsView && viewItem == group-custom",
+          "group": "1_modification@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "changeGroups.renameGroup",
+          "when": "false"
+        },
+        {
+          "command": "changeGroups.deleteGroup",
+          "when": "false"
+        },
+        {
+          "command": "changeGroups.moveGroupUp",
+          "when": "false"
+        },
+        {
+          "command": "changeGroups.moveGroupDown",
+          "when": "false"
+        },
+        {
+          "command": "changeGroups.addToGroup",
+          "when": "false"
+        },
+        {
+          "command": "changeGroups.removeFromGroup",
+          "when": "false"
+        },
+        {
+          "command": "changeGroups.stageFile",
+          "when": "false"
+        },
+        {
+          "command": "changeGroups.unstageFile",
+          "when": "false"
+        },
+        {
+          "command": "changeGroups.discardFile",
+          "when": "false"
+        },
+        {
+          "command": "changeGroups.openFile",
+          "when": "false"
+        },
+        {
+          "command": "changeGroups.openChanges",
+          "when": "false"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "npm run compile && mocha --require out/test/hook.js \"out/test/**/*.test.js\""
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.84.0",
+    "mocha": "^10.4.0",
+    "typescript": "^5.4.0"
+  }
+}
